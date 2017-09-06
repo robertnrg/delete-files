@@ -1,0 +1,7 @@
+{
+    "directories": ".",
+    "extensions": ".log|.png|.class|.jpg",
+    "pattern": "log",
+    "days_of_expiration": 7,
+    "search_in_subdirectories": true
+}
