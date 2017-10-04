@@ -13,6 +13,8 @@ import (
 	"time"
 
 	logging "github.com/op/go-logging"
+	"github.com/dustin/go-humanize"
+	"path/filepath"
 )
 
 // Config struct for configuration
@@ -69,48 +71,55 @@ func main() {
 	directories := strings.Split(configuration.Directories, "|")
 	extensions := strings.Split(configuration.Extensions, "|")
 	var totalFilesDeleted uint
+	var totalSizeFilesDeleted int64
 	for _, directory := range directories {
 		existsPath, err := existsPath(directory)
-		validateError(err, true)
-		if existsPath {
-			totalFilesDeleted += deleteFile(directory, configuration.Pattern, extensions, configuration.DaysOfExpiration, configuration.SearchInSubdirectories)
+		if validateError(err, true) && existsPath {
+			tmpFilesDeleted, tmpSizeDeleted := deleteFile(directory, configuration.Pattern, extensions, configuration.DaysOfExpiration, configuration.SearchInSubdirectories)
+			totalFilesDeleted += tmpFilesDeleted
+			totalSizeFilesDeleted += tmpSizeDeleted
 		}
 	}
-	log.Notice("Total files deleted: ", totalFilesDeleted)
+	log.Noticef("Files deleted: %d - Size deleted: %s", totalFilesDeleted, humanize.Bytes(uint64(totalSizeFilesDeleted)))
 }
 
-func deleteFile(directory string, pattern string, extensions []string, daysOfExpiration uint, searchInSubDirs bool) uint {
+func deleteFile(directory, pattern string, extensions []string, daysOfExpiration uint, searchInSubDirs bool) (uint, int64) {
 	var filesDeleted uint
-	files, _ := ioutil.ReadDir(directory)
-	for _, file := range files {
-		fileCompleteName := directory + string(os.PathSeparator) + file.Name()
-		if file.IsDir() && searchInSubDirs {
-			filesDeletedSubDir := deleteFile(fileCompleteName, pattern, extensions, daysOfExpiration, searchInSubDirs)
-			filesDeleted = filesDeleted + filesDeletedSubDir
-			log.Infof("Files deleted in %s: %d", fileCompleteName, filesDeletedSubDir)
-		} else if !file.IsDir() {
-			if matchStr(file.Name(), pattern) || endsWith(file.Name(), extensions) {
-				log.Info("File: ", file.Name())
-				log.Info("Last update: ", file.ModTime().Format("2006-01-02"))
-				daysOld := uint(time.Since(file.ModTime()).Hours()) / 24
-				log.Debug("Days old: ", daysOld)
-				if daysOld >= daysOfExpiration {
-					err := os.Remove(fileCompleteName)
-					if validateError(err, true) {
-						filesDeleted = filesDeleted + 1
-						log.Info("File deleted: ", fileCompleteName)
+	var totalSizeDeleted int64
+	files, err := ioutil.ReadDir(directory)
+	if validateError(err, true) {
+		for _, file := range files {
+			fileCompleteName, err := filepath.Abs(directory)
+			validateError(err, true)
+			fileCompleteName += string(os.PathSeparator) + file.Name()
+			if file.IsDir() && searchInSubDirs {
+				filesDeletedSubDir, totalSizeDeletedSubDir := deleteFile(fileCompleteName, pattern, extensions, daysOfExpiration, searchInSubDirs)
+				filesDeleted = filesDeleted + filesDeletedSubDir
+				totalSizeDeleted = totalSizeDeleted + totalSizeDeletedSubDir
+				log.Infof("Directory: %s - Files deleted: %d - Size deleted: %s", fileCompleteName, filesDeletedSubDir, humanize.Bytes(uint64(totalSizeDeletedSubDir)))
+			} else if !file.IsDir() {
+				if (!isEmpty(pattern) && matchStr(file.Name(), pattern)) || (len(extensions) > 0 && endsWith(file.Name(), extensions)) {
+					daysOld := uint(time.Since(file.ModTime()).Hours()) / 24
+					log.Infof("File: %s - Last update: %s - Days old: %d", file.Name(), file.ModTime().Format("2006-01-02"), daysOld)
+					if daysOld >= daysOfExpiration {
+						err := os.Remove(fileCompleteName)
+						if validateError(err, true) {
+							filesDeleted = filesDeleted + 1
+							totalSizeDeleted = totalSizeDeleted + file.Size()
+							log.Infof("File deleted: %s - Size: %s", fileCompleteName, humanize.Bytes(uint64(file.Size())))
+						}
 					}
 				}
 			}
 		}
 	}
 
-	return filesDeleted
+	return filesDeleted, totalSizeDeleted
 }
 
 func endsWith(word string, suffixes []string) bool {
 	for _, suffix := range suffixes {
-		if strings.HasSuffix(word, suffix) {
+		if !isEmpty(suffix) && strings.HasSuffix(strings.ToUpper(word), strings.ToUpper(suffix)) {
 			log.Debugf("Word '%s' has suffix '%s'", word, suffix)
 
 			return true
@@ -121,7 +130,7 @@ func endsWith(word string, suffixes []string) bool {
 
 }
 
-func matchStr(word string, pattern string) bool {
+func matchStr(word, pattern string) bool {
 	match, _ := regexp.MatchString(pattern, word)
 	if match {
 		log.Debugf("Word '%s' match with string '%s'", word, pattern)
@@ -155,4 +164,8 @@ func existsPath(path string) (bool, error) {
 	}
 
 	return true, err
+}
+
+func isEmpty(str string) bool {
+	return len(strings.TrimSpace(str)) == 0
 }
