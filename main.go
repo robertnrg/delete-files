@@ -12,10 +12,12 @@ import (
 
 	"time"
 
-	logging "github.com/op/go-logging"
 	"github.com/dustin/go-humanize"
+	logging "github.com/op/go-logging"
 	"path/filepath"
 )
+
+const VERSION = "1.0.0"
 
 // Config struct for configuration
 type Config struct {
@@ -67,6 +69,7 @@ func main() {
 	validateError(err, false)
 	defer fileLog.Close()
 	initLog(fileLog)
+	log.Infof("Version: %s", VERSION)
 	log.Debug("Config: ", configuration)
 	directories := strings.Split(configuration.Directories, "|")
 	extensions := strings.Split(configuration.Extensions, "|")
